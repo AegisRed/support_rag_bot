@@ -1,54 +1,397 @@
 # Support RAG Assistant Bot
 
-Телеграм-бот для саппорта с жёсткими границами ответа и более живым диалоговым флоу.
+Production-style Telegram bot for first-line support triage with retrieval-augmented generation (RAG), strict answer boundaries, and controlled escalation to a human operator.
 
-Что он делает:
-- принимает новый тикет как обычное сообщение;
-- ищет релевантные статьи в локальной базе знаний через эмбеддинги;
-- отвечает сам только если контекст действительно достаточен;
-- при пограничном кейсе может задать короткое уточнение, но не допрашивает пользователя шаблонными списками;
-- не шлёт ссылки в каждом сообщении, а показывает их только когда они реально могут помочь;
-- если по базе знаний лучше не гадать, переводит тикет в режим ручного разбора до `/exitticket`;
-- может скрывать внутреннюю диагностику через `.env`.
+The project demonstrates a pragmatic support workflow:
+- accept an incoming support ticket as a plain Telegram message;
+- retrieve relevant knowledge base articles from a local vectorized store;
+- answer only when the available context is sufficient;
+- ask a short follow-up only when one more user message can realistically unlock a grounded answer;
+- stop guessing and hand off the ticket when the case is account-specific, operational, or requires manual investigation.
 
-## Почему архитектура такая
+This repository is intentionally focused on **decision quality and boundaries**, not on a specific real-world knowledge base.
 
-1. Retrieval сначала — бот не генерирует ответ из воздуха.
-2. LLM только после retrieval — Gemini видит только историю тикета и найденный контекст.
-3. Жёсткий final gate — даже если модель захотела ответить, бот проверяет retrieval score, confidence и валидность ссылок.
-4. Clarify only when useful — уточнение задаётся только если один следующий ответ реально может помочь дать grounded reply.
-5. Логирование — все тикеты и решения сохраняются в SQLite.
+## Why this project exists
 
-## Поведение диалога
+Most support queues contain repetitive questions that are already covered by internal docs or a public help center. The hard part is not generating text — it is deciding **when the assistant is allowed to answer** and **when it should stay quiet and escalate**.
 
-- В обычном режиме показывается меню с inline-кнопками.
-- После начала тикета сообщения бота в ticket-flow идут без кнопок.
-- Бот старается писать коротко и по-человечески, без постоянных списков и машинных блоков.
-- Если кейс неясный, бот уточняет только действительно нужную деталь.
-- Если после этого надёжного ответа всё ещё нет, бот перестаёт гадать и переводит тикет в режим ожидания оператора.
-- Команда `/exitticket` завершает тикет и возвращает пользователя в меню с кнопками.
+This bot is built around that principle.
 
-## Запуск
+## Core capabilities
 
-```bash
+- Telegram bot built on `aiogram` 3.x
+- RAG pipeline backed by Gemini embeddings
+- Local SQLite storage for:
+  - knowledge base documents;
+  - precomputed embeddings;
+  - ticket decision logs;
+- conversational support flow without noisy inline controls during active ticket handling
+- dynamic clarification strategy instead of fixed questionnaires
+- configurable decision thresholds through environment variables
+- optional exposure of internal decision diagnostics for debugging/demo mode
+- seed knowledge base for demo and evaluation scenarios
+
+## What the bot does
+
+1. Receives a support issue from a user.
+2. Embeds the incoming message and searches the local knowledge base.
+3. Sends retrieved context plus ticket history to Gemini.
+4. Gemini returns exactly one decision:
+   - `answer`
+   - `clarify`
+   - `handoff`
+5. The application applies an additional server-side gate before presenting the final result.
+6. The full decision is logged to SQLite for audit and later analysis.
+
+## Decision policy
+
+The assistant is designed to prefer a safe fallback over a confident hallucination.
+
+### `answer`
+Used only when the retrieved knowledge base clearly supports a concrete reply.
+
+Typical examples:
+- password reset instructions;
+- invoice download path;
+- known feature availability by plan;
+- documented rate-limit behavior.
+
+### `clarify`
+Used only when a short follow-up can realistically turn the case into a grounded answer.
+
+Typical examples:
+- the user mentions login issues but not whether this is password reset, 2FA recovery, or a temporary service issue;
+- the request is missing one critical detail that maps directly to a documented KB branch.
+
+### `handoff`
+Used when the bot should stop guessing.
+
+Typical examples:
+- 5xx/server-side errors;
+- account-specific problems;
+- cases that require logs, admin access, billing actions, or private system checks;
+- ambiguous issues that would remain ambiguous even after another follow-up.
+
+## Current handoff model
+
+This version implements **handoff state**, not a full operator routing backend.
+
+That means:
+- the bot can stop auto-answering and mark the ticket as requiring a human;
+- the user remains in a dedicated ticket state until `/exitticket`;
+- the project does **not yet** forward the ticket to a live operator chat, forum topic, CRM, or helpdesk system.
+
+This is intentional and should be stated clearly in production discussions.
+
+## Architecture
+
+```text
+Telegram User
+    ↓
+aiogram Router / FSM
+    ↓
+Ticket Orchestrator
+    ├─ embed query via Gemini
+    ├─ retrieve top-K KB hits from SQLite
+    ├─ ask Gemini for structured decision
+    ├─ apply local safety gate
+    └─ log result to SQLite
+```
+
+### Main components
+
+#### `support_rag_bot/bot.py`
+Application entrypoint. Initializes:
+- bot instance;
+- dispatcher and FSM storage;
+- Gemini service;
+- RAG service;
+- knowledge base bootstrap;
+- Telegram bot commands and descriptions.
+
+#### `support_rag_bot/routers/start.py`
+Start/help/menu handlers.
+
+#### `support_rag_bot/routers/tickets.py`
+Ticket lifecycle orchestration:
+- start ticket;
+- accept free-form text;
+- clarification loop;
+- handoff mode;
+- exit flow.
+
+#### `support_rag_bot/services/gemini_service.py`
+Wrapper around Gemini API for:
+- document embeddings;
+- query embeddings;
+- structured decision generation.
+
+#### `support_rag_bot/services/rag_service.py`
+Main business logic:
+- bootstrap KB;
+- retrieval;
+- grounding checks;
+- answer formatting;
+- link display control;
+- final decision shaping.
+
+#### `support_rag_bot/services/storage.py`
+SQLite persistence layer.
+
+#### `support_rag_bot/services/seed.py`
+Demo knowledge base used for local evaluation.
+
+## Repository structure
+
+```text
+.
+├── run.py
+├── Dockerfile
+├── requirements.txt
+├── .env.example
+└── support_rag_bot/
+    ├── bot.py
+    ├── config.py
+    ├── keyboards.py
+    ├── logging_setup.py
+    ├── models.py
+    ├── states.py
+    ├── routers/
+    │   ├── start.py
+    │   └── tickets.py
+    └── services/
+        ├── gemini_service.py
+        ├── rag_service.py
+        ├── seed.py
+        └── storage.py
+```
+
+## Tech stack
+
+- Python 3.11+
+- aiogram 3.x
+- Google Gemini API
+- SQLite + aiosqlite
+- Pydantic / pydantic-settings
+
+## Configuration
+
+Create `.env` from `.env.example`.
+
+### Required variables
+
+```env
+TELEGRAM_BOT_TOKEN=...
+GEMINI_API_KEY=...
+```
+
+### Full example
+
+```env
+TELEGRAM_BOT_TOKEN=123456:replace_me
+GEMINI_API_KEY=replace_me
+GEMINI_GENERATION_MODEL=gemini-2.5-flash
+GEMINI_EMBEDDING_MODEL=gemini-embedding-2
+KB_SOURCE_SITES=https://help.northstar.test,https://billing.northstar.test,https://status.northstar.test
+DB_PATH=data/support_rag.sqlite3
+TOP_K=4
+MIN_SIMILARITY_SCORE=0.72
+MIN_SELF_CONFIDENCE=0.78
+MAX_CLARIFICATION_ROUNDS=2
+SHOW_DECISION_DETAILS=false
+LOG_LEVEL=INFO
+ADMIN_USER_IDS=
+```
+
+### Important settings
+
+#### `MIN_SIMILARITY_SCORE`
+Minimum retrieval quality required before the bot is comfortable grounding an answer.
+
+Higher value:
+- fewer auto-replies;
+- more handoffs;
+- lower hallucination risk.
+
+Lower value:
+- more aggressive auto-replies;
+- higher risk of answering from weak matches.
+
+#### `MIN_SELF_CONFIDENCE`
+Minimum model confidence required for a final grounded response.
+
+#### `MAX_CLARIFICATION_ROUNDS`
+Upper bound for clarification loops.
+
+Recommended production behavior: keep this low. The support assistant should not interrogate the user indefinitely.
+
+#### `SHOW_DECISION_DETAILS`
+When enabled, the bot can expose debugging-style output useful in demos or internal QA. Recommended value for user-facing environments: `false`.
+
+#### `ADMIN_USER_IDS`
+Comma-separated Telegram user IDs allowed to run administrative commands such as reindexing.
+
+## Local setup
+
+### Windows (PowerShell)
+
+```powershell
 python -m venv .venv
-.venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-copy .env.example .env
+Copy-Item .env.example .env
 python run.py
 ```
 
-## Что лежит в базе знаний
+### Linux / macOS
 
-Seed-база выдумана специально под задание и включает типичные саппорт-темы:
-- reset password;
-- потеря 2FA;
-- invoices;
-- cancel subscription;
-- export CSV;
-- API 429 / rate limits;
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python run.py
+```
+
+## Docker
+
+Build and run locally:
+
+```bash
+docker build -t support-rag-bot .
+docker run --rm -it --env-file .env support-rag-bot
+```
+
+## Telegram commands
+
+- `/start` — open start screen
+- `/newticket` — begin a new ticket explicitly
+- `/exitticket` — end current ticket and return to menu
+- `/kb` — list seeded knowledge base documents
+- `/examples` — show example support prompts
+- `/reindex` — rebuild seeded embeddings (admin-only if `ADMIN_USER_IDS` is configured)
+
+## Example interaction
+
+### Answer path
+
+User:
+> Я не вижу кнопку экспорта CSV на тарифе Starter
+
+Bot:
+> На тарифе Starter экспорт CSV недоступен. Эта функция есть на Growth и Enterprise. Если нужен экспорт, проверь тариф workspace или передай запрос на апгрейд.
+
+### Clarification path
+
+User:
+> Не получается войти в аккаунт
+
+Bot:
+> Понял. Это проблема со входом в существующий аккаунт или вы пытаетесь восстановить доступ?
+
+### Handoff path
+
+User:
+> При авторизации сайт возвращает ошибку 500
+
+Bot:
+> Если при входе уже возникает ошибка 500, это похоже на серверную или внутреннюю проблему. Тут лучше не гадать по базе знаний — такой кейс стоит передать оператору. Завершить тикет можно командой /exitticket.
+
+## Seed knowledge base
+
+The repository ships with a small demo KB covering common SaaS support topics such as:
+- password reset;
+- lost 2FA access;
+- invoices and billing;
+- subscription cancellation policy;
+- CSV export availability;
+- API rate limits and 429 handling;
 - webhook retry policy;
 - SSO requirements;
-- status page / incidents.
+- service status/incidents.
 
-Список базовых сайтов для ссылок берётся из `KB_SOURCE_SITES` в `.env`.
+This KB is synthetic and exists to demonstrate retrieval and decision logic.
+
+## Logging and auditability
+
+Every processed ticket is written to SQLite with:
+- timestamp;
+- Telegram user ID;
+- username;
+- original input text;
+- final mode;
+- confidence value;
+- generated reply;
+- short reasoning string;
+- selected source metadata;
+- missing-information hints.
+
+This makes the project easier to review, debug, and evaluate offline.
+
+## Operational limitations
+
+The current repository is intentionally lightweight. Before shipping to a real support environment, you would usually add:
+- real KB ingestion from Markdown, HTML, PDF, Confluence, Notion, or a help center API;
+- chunking and metadata-aware indexing;
+- live operator routing;
+- admin dashboard or ticket monitor;
+- rate limiting and retry policy for upstream model calls;
+- structured observability and metrics;
+- secrets management beyond local `.env`;
+- tests and CI.
+
+## Recommended production next steps
+
+1. Replace seed documents with a real ingestion pipeline.
+2. Add operator handoff integration:
+   - Telegram admin chat;
+   - forum topics;
+   - CRM/helpdesk bridge.
+3. Add regression tests for decision outcomes.
+4. Introduce caching and backoff around Gemini API calls.
+5. Add message deduplication and abuse/rate controls.
+6. Split storage into:
+   - relational logs;
+   - vector index optimized for retrieval at scale.
+
+## Security notes
+
+- Do not commit `.env` to the repository.
+- Treat `GEMINI_API_KEY` and `TELEGRAM_BOT_TOKEN` as secrets.
+- The demo seed KB contains no real customer data.
+- SQLite is sufficient for a local demo but not ideal for high-concurrency production support workloads.
+
+## Troubleshooting
+
+### Bot starts but does not answer
+Check:
+- `TELEGRAM_BOT_TOKEN` is valid;
+- webhook is not conflicting with polling mode;
+- Gemini key is present;
+- dependencies are installed correctly.
+
+### Bot answers too aggressively
+Increase:
+- `MIN_SIMILARITY_SCORE`
+- `MIN_SELF_CONFIDENCE`
+
+Reduce:
+- `MAX_CLARIFICATION_ROUNDS`
+
+### Bot escalates too often
+Lower thresholds gradually and test against a labeled set of representative tickets.
+
+### Reindex is needed after KB changes
+Run:
+
+```bash
+/reindex
+```
+
+Or rebuild the database by removing the local SQLite file and starting the bot again.
+
+## License / usage
+
+This repository is suitable as a demo project, technical assignment deliverable, or base template for a safer support assistant.
+
+If you want, the next practical upgrade is straightforward: connect real operator routing and replace the synthetic KB with a true ingestion pipeline.
