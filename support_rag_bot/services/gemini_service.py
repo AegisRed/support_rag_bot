@@ -209,6 +209,7 @@ class GeminiService:
             "the manager to solve or clarify the client's issue first.\n"
             "Do not expose the private manager hint in the client reply.\n"
             "citation_ids must contain only ids from the supplied KB context that support the reply/hint.\n"
+            "If manager_hint recommends any commercial offer, upsell_product must contain that offer name. "
             "upsell_product must be the exact plan/product name supported by context, or null.\n\n"
             f"Client message:\n{client_message}\n\n"
             f"Manager/CRM context:\n{manager_context or '(not provided)'}\n\n"
