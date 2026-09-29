@@ -24,6 +24,9 @@ async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
 
+    if not settings.telegram_bot_token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is required to run the Telegram bot.")
+
     bot = Bot(token=settings.telegram_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
 
