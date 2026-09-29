@@ -27,9 +27,9 @@ class RAGService:
 
     async def bootstrap(self) -> None:
         await self.store.init()
-        if await self.store.count_documents() > 0:
-            return
         docs = build_seed_documents(self.source_sites)
+        if await self.store.count_documents() >= len(docs):
+            return
         payload: list[tuple[KBDocument, list[float]]] = []
         for doc in docs:
             embedding = await self.gemini.embed_for_document(f"{doc.title}\n{doc.section}\n{doc.content}")
