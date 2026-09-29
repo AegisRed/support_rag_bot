@@ -156,4 +156,21 @@ def build_seed_documents(source_sites: list[str]) -> list[KBDocument]:
         ),
     )
 
-    return [doc1, doc2, doc3, doc4, doc5, doc6, doc7, doc8, doc9]
+    site, url = make_url("/kb/plans/feature-comparison")
+    doc10 = KBDocument(
+        doc_id="kb_plans_comparison",
+        title="Когда предлагать Growth или Enterprise",
+        section="Тарифы",
+        url=url,
+        site=site,
+        tags=["plans", "growth", "enterprise", "upsell"],
+        content=(
+            "Starter подходит для базовой работы без CSV-экспорта и SSO. "
+            "Growth стоит предлагать клиенту, когда ему нужен CSV-экспорт или связанные с ним рабочие процессы. "
+            "Enterprise нужен, когда клиенту требуется SAML SSO и корпоративное управление доступом. "
+            "Менеджер не должен предлагать более высокий тариф без связи с озвученной потребностью клиента. "
+            "Цены, скидки и индивидуальные условия в этой базе знаний не указаны, поэтому их нельзя придумывать."
+        ),
+    )
+
+    return [doc1, doc2, doc3, doc4, doc5, doc6, doc7, doc8, doc9, doc10]
