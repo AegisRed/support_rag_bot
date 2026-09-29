@@ -7,7 +7,7 @@ from typing import Any
 from google import genai
 from pydantic import BaseModel, Field
 
-from support_rag_bot.models import LLMDecision, RetrievalHit
+from support_rag_bot.models import CRMAssistDecision, LLMDecision, RetrievalHit
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,14 @@ class _DecisionSchema(BaseModel):
     reply_text: str
     citation_ids: list[str]
     missing_information: list[str]
+
+
+class _CRMAssistSchema(BaseModel):
+    client_reply: str
+    manager_hint: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    citation_ids: list[str]
+    upsell_product: str | None = None
 
 
 class GeminiService:
@@ -156,4 +164,72 @@ class GeminiService:
             reply_text=parsed.reply_text.strip(),
             citation_ids=parsed.citation_ids,
             missing_information=parsed.missing_information,
+        )
+
+
+    async def generate_crm_assist(
+        self,
+        client_message: str,
+        manager_context: str,
+        hits: list[RetrievalHit],
+    ) -> CRMAssistDecision:
+        return await asyncio.to_thread(
+            self._generate_crm_assist_sync,
+            client_message,
+            manager_context,
+            hits,
+        )
+
+    def _generate_crm_assist_sync(
+        self,
+        client_message: str,
+        manager_context: str,
+        hits: list[RetrievalHit],
+    ) -> CRMAssistDecision:
+        context = [
+            {
+                "citation_id": hit.document.doc_id,
+                "title": hit.document.title,
+                "section": hit.document.section,
+                "score": round(hit.score, 4),
+                "content": hit.document.content,
+            }
+            for hit in hits
+        ]
+
+        prompt = (
+            "You are an AI copilot for a sales/support manager working in an AmoCRM chat window.\n"
+            "Use only facts from the provided knowledge base context and explicit manager context.\n"
+            "Return two clearly different outputs: a client-facing reply and a private manager hint.\n"
+            "The client reply must be polite, concise, natural Russian and safe to send as-is.\n"
+            "The manager hint must be short and practical. Suggest an upsell only when the client's stated need "
+            "clearly maps to a higher plan or capability explicitly documented in the KB.\n"
+            "Never invent prices, discounts, deadlines, plan features, guarantees, or policies.\n"
+            "If there is no grounded upsell opportunity, say that there is no relevant upsell right now and advise "
+            "the manager to solve or clarify the client's issue first.\n"
+            "Do not expose the private manager hint in the client reply.\n"
+            "citation_ids must contain only ids from the supplied KB context that support the reply/hint.\n"
+            "If manager_hint recommends any commercial offer, upsell_product must contain that offer name. "
+            "upsell_product must be the exact plan/product name supported by context, or null.\n\n"
+            f"Client message:\n{client_message}\n\n"
+            f"Manager/CRM context:\n{manager_context or '(not provided)'}\n\n"
+            f"Knowledge base context:\n{context}"
+        )
+
+        response = self.client.models.generate_content(
+            model=self.generation_model,
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json",
+                "response_json_schema": _CRMAssistSchema.model_json_schema(),
+                "temperature": 0.15,
+            },
+        )
+        parsed = _CRMAssistSchema.model_validate_json(response.text or "{}")
+        return CRMAssistDecision(
+            client_reply=parsed.client_reply.strip(),
+            manager_hint=parsed.manager_hint.strip(),
+            confidence=parsed.confidence,
+            citation_ids=parsed.citation_ids,
+            upsell_product=parsed.upsell_product.strip() if parsed.upsell_product else None,
         )

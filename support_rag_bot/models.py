@@ -51,3 +51,26 @@ class TicketResult:
     @property
     def auto_resolved(self) -> bool:
         return self.mode == "answer"
+
+
+class CRMAssistDecision(BaseModel):
+    client_reply: str = Field(description="Polite grounded reply that can be sent to the client.")
+    manager_hint: str = Field(description="Private concise hint for the manager, including a relevant upsell only when grounded.")
+    confidence: float = Field(ge=0.0, le=1.0)
+    citation_ids: list[str] = Field(default_factory=list, description="Only source ids from the provided KB context.")
+    upsell_product: str | None = Field(
+        default=None,
+        description="Plan or product to offer when there is a grounded upsell opportunity; otherwise null.",
+    )
+
+
+@dataclass(slots=True)
+class CRMAssistResult:
+    client_message: str
+    manager_context: str
+    client_reply: str
+    manager_hint: str
+    confidence: float
+    hits: list[RetrievalHit]
+    citation_ids: list[str]
+    upsell_product: str | None

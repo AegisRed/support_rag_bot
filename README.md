@@ -395,3 +395,66 @@ Or rebuild the database by removing the local SQLite file and starting the bot a
 This repository is suitable as a demo project, technical assignment deliverable, or base template for a safer support assistant.
 
 If you want, the next practical upgrade is straightforward: connect real operator routing and replace the synthetic KB with a true ingestion pipeline.
+
+
+## AmoCRM AI Copilot test demo
+
+This branch also contains a small web prototype for the O-complex test assignment. It reuses the same grounded retrieval pipeline, but presents the result in the workflow expected from an AmoCRM manager assistant:
+
+1. accept the latest client message;
+2. optionally accept context from the CRM card (current plan, deal note, manager note);
+3. retrieve relevant entries from the short knowledge base;
+4. return two separated outputs:
+   - a polite reply that is safe to send to the client;
+   - a private manager hint with an upsell only when the client's need clearly matches a documented higher-plan capability.
+
+The prototype intentionally does **not** pretend to be a live AmoCRM OAuth integration. The HTTP endpoint is the integration boundary; a production adapter can pass messages and deal context from AmoCRM into the same service.
+
+### Run the demo
+
+For the web demo only, `TELEGRAM_BOT_TOKEN` is not required.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate   # Windows: .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+cp .env.example .env        # Windows: Copy-Item .env.example .env
+# Put GEMINI_API_KEY into .env
+python run_demo.py
+```
+
+Open `http://127.0.0.1:8080`.
+
+The page includes three ready-made scenarios useful for a 1–2 minute recording:
+- Starter customer needs CSV export → grounded Growth upsell;
+- customer needs SAML SSO → grounded Enterprise upsell;
+- password-reset problem → support answer without forcing an upsell.
+
+### HTTP contract
+
+`POST /api/assist`
+
+```json
+{
+  "client_message": "У нас Starter, но нужен экспорт CSV. Где его включить?",
+  "manager_context": "Текущий тариф: Starter."
+}
+```
+
+Response:
+
+```json
+{
+  "client_reply": "Клиентский ответ...",
+  "manager_hint": "Внутренняя подсказка менеджеру...",
+  "upsell_product": "Growth",
+  "confidence": 0.93,
+  "sources": []
+}
+```
+
+The source list is populated with the KB documents actually cited by the model. If retrieval or model confidence is too weak, the service falls back to a safe clarification and explicitly tells the manager not to upsell blindly.
+
+### Suggested 1–2 minute demo script
+
+Show the CSV scenario first: enter a Starter client message, run the assistant, and point out that the response is split into client-facing and private manager blocks. Then switch to the password-reset sample to demonstrate that the system does not invent an upsell when there is no relevant commercial opportunity. Finish by briefly mentioning Python/FastAPI, Gemini structured generation + embeddings, SQLite RAG storage, and the safety gate that validates similarity, confidence and citations.
