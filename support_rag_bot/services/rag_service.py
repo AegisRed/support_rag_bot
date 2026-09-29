@@ -28,7 +28,8 @@ class RAGService:
     async def bootstrap(self) -> None:
         await self.store.init()
         docs = build_seed_documents(self.source_sites)
-        if await self.store.count_documents() >= len(docs):
+        stored_ids = {document.doc_id for document in await self.store.list_documents()}
+        if all(document.doc_id in stored_ids for document in docs):
             return
         payload: list[tuple[KBDocument, list[float]]] = []
         for doc in docs:
