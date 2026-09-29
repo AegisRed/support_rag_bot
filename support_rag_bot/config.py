@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    telegram_bot_token: str = Field(alias="TELEGRAM_BOT_TOKEN")
+    telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
     gemini_api_key: str = Field(alias="GEMINI_API_KEY")
 
     gemini_generation_model: str = "gemini-2.5-flash"
