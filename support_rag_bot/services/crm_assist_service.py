@@ -48,8 +48,21 @@ class CRMAssistService:
         citation_ids = [doc_id for doc_id in decision.citation_ids if doc_id in valid_ids]
         citations_are_valid = bool(citation_ids) and len(citation_ids) == len(decision.citation_ids)
 
+        cited_documents = [
+            hit.document for hit in hits if hit.document.doc_id in set(citation_ids)
+        ]
+        upsell_is_grounded = (
+            decision.upsell_product is None
+            or any(
+                decision.upsell_product.casefold()
+                in f"{document.title} {document.content}".casefold()
+                for document in cited_documents
+            )
+        )
+
         if (
             not citations_are_valid
+            or not upsell_is_grounded
             or decision.confidence < self.min_self_confidence
             or not decision.client_reply
             or not decision.manager_hint
